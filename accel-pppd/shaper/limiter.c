@@ -17,6 +17,8 @@
 #include "log.h"
 #include "ppp.h"
 
+#include "memdebug.h"
+
 #include "shaper.h"
 #include "tc_core.h"
 #include "libnetlink.h"
@@ -364,7 +366,7 @@ static int install_adv_class(struct rtnl_handle *rth, int ifindex, int rate, int
 	return 0;
 }
 
-static int install_u32_filter(struct rtnl_handle *rth, int ifindex, struct adv_shaper_filter *filter_opt)
+static int install_u32_filter(struct rtnl_handle *rth, int ifindex, struct adv_shaper_filter *filter_opt, struct list_head *action_list)
 {
 	struct {
 	    struct nlmsghdr 	n;
@@ -404,6 +406,13 @@ static int install_u32_filter(struct rtnl_handle *rth, int ifindex, struct adv_s
 
 	struct rtattr *tail = NLMSG_TAIL(&req.n);
 	addattr_l(&req.n, MAX_MSG, TCA_OPTIONS, NULL, 0);
+
+	struct action_opt *action_opt = NULL;
+	list_for_each_entry(action_opt, action_list, entry) {
+		if (action_opt->action_prepare) {
+			action_opt->action_prepare(action_opt, &req.n);
+		}
+	}
 
 	__u32 flowid = filter_opt->classid;
 	addattr_l(&req.n, MAX_MSG, TCA_U32_CLASSID, &(flowid), 4);
@@ -454,16 +463,151 @@ static int install_fw_filter(struct rtnl_handle *rth, int ifindex, struct adv_sh
 
 }
 
-static int install_adv_filter(struct rtnl_handle *rth, int ifindex, __u8 isdown)
+static int action_pass(struct action_opt *aopt, struct nlmsghdr *n)
 {
+	return 0;
+//	struct tc_htb_glob opt;
+//	struct rtattr *tail;
+//
+//	memset(&opt,0,sizeof(opt));
+//
+//	opt.rate2quantum = qopt->quantum;
+//	opt.version = 3;
+//	opt.defcls = qopt->defcls;
+//
+//	tail = NLMSG_TAIL(n);
+//	addattr_l(n, TCA_BUF_MAX, TCA_OPTIONS, NULL, 0);
+//	addattr_l(n, TCA_BUF_MAX, TCA_HTB_INIT, &opt, NLMSG_ALIGN(sizeof(opt)));
+//	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+//	return 0;
+}
+
+static int action_police(struct action_opt *aopt, struct nlmsghdr *n)
+{
+	__u32 rtab[256];
+	struct rtattr *tail, *tail1, *tail2;
+	int Rcell_log = -1;
+	unsigned int linklayer  = LINKLAYER_ETHERNET; /* Assume ethernet */
+
+	struct tc_police police = {
+		.action    = aopt->action,
+		.rate.rate = aopt->rate,
+		.rate.mpu  = aopt->mpu,
+		.mtu       = aopt->mtu,
+		.limit     = (double)aopt->rate * conf_latency + aopt->burst,
+		.burst     = tc_calc_xmittime(aopt->rate, aopt->burst),
+	};
+
+	if (tc_calc_rtable(&police.rate, rtab, Rcell_log, aopt->mtu, linklayer) < 0) {
+		log_error("adv_shaper: failed to calculate ceil rate table.\n");
+		return -1;
+	}
+
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, TCA_U32_ACT, NULL, 0);
+
+	tail1 = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, 1, NULL, 0);
+	addattr_l(n, MAX_MSG, TCA_ACT_KIND, "police", 7);
+
+	tail2 = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, TCA_ACT_OPTIONS, NULL, 0);
+	addattr_l(n, MAX_MSG, TCA_POLICE_TBF, &police, sizeof(police));
+	addattr_l(n, MAX_MSG, TCA_POLICE_RATE, rtab, 1024);
+	tail2->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail2;
+
+	tail1->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail1;
+
+	tail->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail;
+
+	return 0;
+
+
+//	struct tc_htb_glob opt;
+//	struct rtattr *tail;
+//
+//	memset(&opt,0,sizeof(opt));
+//
+//	opt.rate2quantum = qopt->quantum;
+//	opt.version = 3;
+//	opt.defcls = qopt->defcls;
+//
+//	tail = NLMSG_TAIL(n);
+//	addattr_l(n, TCA_BUF_MAX, TCA_OPTIONS, NULL, 0);
+//	addattr_l(n, TCA_BUF_MAX, TCA_HTB_INIT, &opt, NLMSG_ALIGN(sizeof(opt)));
+//	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
+//	return 0;
+}
+
+static int prepare_action_opt(struct adv_shaper_action *action_opt, struct action_opt *opt, int rate, int burst)
+{
+	if (!strcmp(action_opt->kind, "pass")) {
+
+		opt->kind   = "pass";
+		opt->action = action_opt->action;
+
+		opt->action_prepare = action_pass;
+
+	} else if (!strcmp(action_opt->kind, "police")) {
+
+		opt->kind     = "police";
+		opt->rate     = action_opt->rate;
+		opt->burst    = action_opt->burst;
+		opt->mtu      = action_opt->mtu;
+		opt->mpu      = action_opt->mpu;
+		opt->action   = action_opt->action;
+
+		opt->action_prepare = action_police;
+
+		if (!opt->rate) {
+			opt->rate = rate;
+		}
+
+		if (!opt->burst) {
+			opt->burst = burst;
+		}
+
+	} else {
+		return -1;
+	}
+
+	return 0;
+}
+
+static int install_adv_filter(struct rtnl_handle *rth, int ifindex, int rate, int burst, __u8 isdown)
+{
+	LIST_HEAD(adv_shaper_action_for_filter_list);
+	struct action_opt *opt = NULL;
 	struct adv_shaper_filter *filter_opt;
 
 	list_for_each_entry(filter_opt, &conf_adv_shaper_filter_list, entry) {
 		if (filter_opt->isdown != isdown) {
 			continue;
 		}
+
+		struct adv_shaper_action *action_opt;
+
+		list_for_each_entry(action_opt, &conf_adv_shaper_action_list, entry) {
+			if (action_opt->parentid == filter_opt->parentid && action_opt->priority == filter_opt->priority) {
+				log_debug("adv_shaper: install: action = (kind %s, parentid 0x%x, priority %u, action %u)\n",
+						action_opt->kind, action_opt->parentid, action_opt->priority, action_opt->action);
+
+				opt = _malloc(sizeof(*opt));
+				memset(opt, 0, sizeof(*opt));
+
+				if (prepare_action_opt(action_opt, opt, rate, burst)) {
+					_free(opt);
+					log_error("adv_shaper: install: error while preparing action! (kind %s, parentid 0x%x, priority %u, action %u)\n",
+						action_opt->kind, action_opt->parentid, action_opt->priority, action_opt->action);
+					goto out_error;
+				}
+
+				list_add_tail(&opt->entry, &adv_shaper_action_for_filter_list);
+			}
+		}
+
 		if (filter_opt->kind == ADV_SHAPER_FILTER_NET || filter_opt->kind == ADV_SHAPER_FILTER_NET6 || filter_opt->kind == ADV_SHAPER_FILTER_U32_RAW) {
-			if (install_u32_filter(rth, ifindex, filter_opt)) {
+			if (install_u32_filter(rth, ifindex, filter_opt, &adv_shaper_action_for_filter_list)) {
 				log_error("limiter: adv_shaper: filter: u32: error while installing filter (parent 0x%x, priority %u, classid 0x%x)!\n",
 						filter_opt->parentid, filter_opt->priority, filter_opt->classid);
 
@@ -471,17 +615,31 @@ static int install_adv_filter(struct rtnl_handle *rth, int ifindex, __u8 isdown)
 					log_error("limiter: adv_shaper: filter: u32: error while installing filter (key %lu: value 0x%x, mask 0x%x, offset %u, offmask 0x%x)!\n",
 						i, filter_opt->keys[i].val, filter_opt->keys[i].mask, filter_opt->keys[i].off, filter_opt->keys[i].offmask);
 				}
-				return -1;
+				goto out_error;
 			}
 		} else if (filter_opt->kind == ADV_SHAPER_FILTER_FW) {
 			if (install_fw_filter(rth, ifindex, filter_opt)) {
 				log_error("limiter: adv_shaper: filter: fw: error while installing filter (0x%x, %u, %u, 0x%x)!\n",
 						filter_opt->parentid, filter_opt->priority, filter_opt->fwmark, filter_opt->classid);
-				return -1;
+				goto out_error;
 			}
 		} else {
 			log_error("limiter: adv_shaper: filter: Unknown filter kind - (%u)", filter_opt->kind);
 		}
+
+		while (!list_empty(&adv_shaper_action_for_filter_list)) {
+			opt = list_entry(adv_shaper_action_for_filter_list.next, typeof(*opt), entry);
+			list_del(&opt->entry);
+			_free(opt);
+		}
+		continue;
+out_error:
+		while (!list_empty(&adv_shaper_action_for_filter_list)) {
+			opt = list_entry(adv_shaper_action_for_filter_list.next, typeof(*opt), entry);
+			list_del(&opt->entry);
+			_free(opt);
+		}
+		return -1;
 	}
 
 	return 0;
@@ -499,7 +657,7 @@ static int install_adv_shaper(struct rtnl_handle *rth, int ifindex, int rate, in
 	if(!res)
 		res = install_adv_leaf_qdisc(rth, ifindex, rate, burst, isdown);
 	if(!res)
-		res = install_adv_filter(rth, ifindex, isdown);
+		res = install_adv_filter(rth, ifindex, rate, burst, isdown);
 
 	pthread_rwlock_unlock(&adv_shaper_lock);
 

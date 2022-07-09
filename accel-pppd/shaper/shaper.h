@@ -20,8 +20,15 @@
 #define ADV_SHAPER_FILTER_FW      3
 #define ADV_SHAPER_FILTER_U32_RAW 4
 
+#define ADV_SHAPER_ACTION_PASS   1
+#define ADV_SHAPER_ACTION_POLICE 2
+
 #define ADV_SHAPER_DOWNLOAD 1
 #define ADV_SHAPER_UPLOAD   0
+
+//Special values for adv_shaper statements
+#define ADV_SHAPER_VAR_STANDARD_SPEED 0
+#define ADV_SHAPER_VAR_CALCULATED     0
 
 struct rtnl_handle;
 struct nlmsghdr;
@@ -47,6 +54,49 @@ struct qdisc_opt {
 	int (*qdisc)(struct qdisc_opt *opt, struct nlmsghdr *n);
 };
 
+struct action_opt {
+	struct list_head entry;
+	char *kind;
+
+	int rate;
+	int burst;
+	__u32 mtu;
+	__u32 mpu;
+
+	int action;
+	int (*action_prepare)(struct action_opt *opt, struct nlmsghdr *n);
+};
+
+//TC Action
+//-------POLICE---------
+//	kind;
+//	rate;
+//	burst;
+//	mtu;
+//	mpu;
+//	action;
+//----------------------
+//
+//-------PASS-----------
+//	action;
+//----------------------
+
+struct adv_shaper_action {
+	struct list_head entry;
+
+	__u8 isdown;
+	__u32 parentid;
+	__u32 priority;
+
+	char *kind;
+
+	int rate;
+	int burst;
+	__u32 mtu;
+	__u32 mpu;
+
+	int action;
+};
 
 //Qdisc kind (htb, tbf, sfq, etc...)
 //Qdisc handle format in config XXXX:XXXX
@@ -95,6 +145,7 @@ struct qdisc_opt {
 //	handle;
 //	parent;
 //---------------------
+
 
 struct adv_shaper_qdisc {
 	struct list_head entry;
@@ -191,6 +242,7 @@ extern pthread_rwlock_t adv_shaper_lock;
 extern struct list_head conf_adv_shaper_qdisc_list;
 extern struct list_head conf_adv_shaper_class_list;
 extern struct list_head conf_adv_shaper_filter_list;
+extern struct list_head conf_adv_shaper_action_list;
 
 int install_limiter(struct ap_session *ses, int down_speed, int down_burst, int up_speed, int up_burst, int idx);
 int remove_limiter(struct ap_session *ses, int idx);
