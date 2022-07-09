@@ -19,6 +19,9 @@
 #define ADV_SHAPER_FILTER_FW      3
 #define ADV_SHAPER_FILTER_U32_RAW 4
 
+#define ADV_SHAPER_DOWNLOAD 1
+#define ADV_SHAPER_UPLOAD   0
+
 struct rtnl_handle;
 struct nlmsghdr;
 
@@ -88,6 +91,8 @@ struct qdisc_opt {
 
 struct adv_shaper_qdisc {
 	struct list_head entry;
+	//isdown - Is limiter for subscriber download
+	__u8 isdown;
 
 	char *kind;
 	int handle;
@@ -114,6 +119,9 @@ struct adv_shaper_qdisc {
 
 struct adv_shaper_class {
 	struct list_head entry;
+	//isdown - Is limiter for subscriber download
+	__u8 isdown;
+
 	__u32 classid;
 	__u32 parentid;
 	__u32 rate;
@@ -131,6 +139,9 @@ struct adv_shaper_u32_key {
 
 struct adv_shaper_filter {
 	struct list_head entry;
+	//isdown - Is limiter for subscriber download
+	__u8 isdown;
+
 	__u32 parentid;
 	__u32 classid;
 	__u32 priority;

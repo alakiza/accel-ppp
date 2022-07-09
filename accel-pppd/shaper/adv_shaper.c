@@ -545,7 +545,7 @@ parse_end:
 //Config pattern:
 //HTB:
 //qdisc = KIND,HANDLE,PARENT,r2q,DEF_CLASS
-static int load_advanced_shaper_qdisc(struct conf_sect_t *s) {
+static int load_advanced_shaper_qdisc(struct conf_sect_t *s, __u8 isdown) {
 	free_advanced_shaper_qdisc();
 
 	struct conf_option_t *opt = NULL;
@@ -559,6 +559,7 @@ static int load_advanced_shaper_qdisc(struct conf_sect_t *s) {
 		struct adv_shaper_qdisc *qdisc = preload_advanced_shaper_qdisc(opt->val);
 
 		if (qdisc) {
+			qdisc->isdown = isdown;
 			list_add_tail(&qdisc->entry, &conf_adv_shaper_qdisc_list);
 		} else {
 			return -1;
@@ -677,7 +678,7 @@ parse_end:
 
 //Config pattern:
 //class = CLASSID,PARENTID,RATE,BURST,CBURST
-static int load_advanced_shaper_class(struct conf_sect_t *s) {
+static int load_advanced_shaper_class(struct conf_sect_t *s, __u8 isdown) {
 	free_advanced_shaper_class();
 
 	struct conf_option_t *opt = NULL;
@@ -691,6 +692,7 @@ static int load_advanced_shaper_class(struct conf_sect_t *s) {
 		struct adv_shaper_class* adv_shaper_class_item = preload_advanced_shaper_class(opt->val);
 
 		if (adv_shaper_class_item) {
+			adv_shaper_class_item->isdown = isdown;
 			list_add_tail(&adv_shaper_class_item->entry, &conf_adv_shaper_class_list);
 		} else {
 			return -1;
@@ -1164,7 +1166,7 @@ parse_end:
 
 //Config pattern:
 //filter_net = PARENT,PRIO,IP4CIDR,(SRC/DST),FLOWID(aka CLASSID)
-static int load_advanced_shaper_filter(struct conf_sect_t *s) 
+static int load_advanced_shaper_filter(struct conf_sect_t *s, __u8 isdown)
 {
 	free_advanced_shaper_filter();
 
@@ -1178,6 +1180,7 @@ static int load_advanced_shaper_filter(struct conf_sect_t *s)
 			struct adv_shaper_filter *adv_shaper_filter_item = preload_advanced_shaper_filter(opt->val);
 
 			if (adv_shaper_filter_item) {
+				adv_shaper_filter_item->isdown = isdown;
 				list_add_tail(&adv_shaper_filter_item->entry, &conf_adv_shaper_filter_list);
 			} else {
 				return -1;
@@ -1278,19 +1281,30 @@ static int check_advanced_shaper(struct conf_sect_t *s)
 
 void load_advanced_shaper()
 {
-	struct conf_sect_t *s = conf_get_section("advanced_shaper");
+	struct conf_sect_t *sect_download = conf_get_section("advanced_shaper");
 
-	log_debug("adv_shaper: load adv_shaper section BEGIN\n");
-	if (s) {
-		pthread_rwlock_wrlock(&adv_shaper_lock);
-
-		if (!check_advanced_shaper(s)) {
-			load_advanced_shaper_qdisc(s);
-			load_advanced_shaper_class(s);
-			load_advanced_shaper_filter(s);
+	log_debug("adv_shaper: load adv_shaper download sections BEGIN\n");
+	pthread_rwlock_wrlock(&adv_shaper_lock);
+	if (sect_download) {
+		if (!check_advanced_shaper(sect_download)) {
+			load_advanced_shaper_qdisc(sect_download, ADV_SHAPER_DOWNLOAD);
+			load_advanced_shaper_class(sect_download, ADV_SHAPER_DOWNLOAD);
+			load_advanced_shaper_filter(sect_download, ADV_SHAPER_DOWNLOAD);
 		}
-
-		pthread_rwlock_unlock(&adv_shaper_lock);
 	}
-	log_debug("adv_shaper: load adv_shaper section END\n");
+	log_debug("adv_shaper: load adv_shaper download section END\n");
+
+	struct conf_sect_t *sect_upload = conf_get_section("advanced_shaper_up");
+
+	log_debug("adv_shaper: load adv_shaper upload section BEGIN\n");
+	if (sect_upload) {
+		if (!check_advanced_shaper(sect_upload)) {
+			load_advanced_shaper_qdisc(sect_upload, ADV_SHAPER_UPLOAD);
+			load_advanced_shaper_class(sect_upload, ADV_SHAPER_UPLOAD);
+			load_advanced_shaper_filter(sect_upload, ADV_SHAPER_UPLOAD);
+		}
+	}
+	pthread_rwlock_unlock(&adv_shaper_lock);
+	log_debug("adv_shaper: load adv_shaper upload section END\n");
 }
+

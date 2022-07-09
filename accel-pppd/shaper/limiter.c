@@ -259,12 +259,14 @@ static int prepare_qdisc_opt(struct adv_shaper_qdisc *qdisc_opt, struct qdisc_op
 	return 0;
 }
 
-static int install_adv_root_qdisc(struct rtnl_handle *rth, int ifindex, int rate, int burst)
+static int install_adv_root_qdisc(struct rtnl_handle *rth, int ifindex, int rate, int burst, __u8 isdown)
 {
 	struct adv_shaper_qdisc *qdisc_opt;
 
 	list_for_each_entry(qdisc_opt, &conf_adv_shaper_qdisc_list, entry) {
-
+		if (qdisc_opt->isdown != isdown) {
+			continue;
+		}
 		struct qdisc_opt opt;
 
 		if (prepare_qdisc_opt(qdisc_opt, &opt, rate, burst)) {
@@ -283,12 +285,15 @@ static int install_adv_root_qdisc(struct rtnl_handle *rth, int ifindex, int rate
 	return 0;
 }
 
-static int install_adv_leaf_qdisc(struct rtnl_handle *rth, int ifindex, int rate, int burst)
+static int install_adv_leaf_qdisc(struct rtnl_handle *rth, int ifindex, int rate, int burst, __u8 isdown)
 {
 	struct adv_shaper_qdisc *qdisc_opt;
 	__u32 qdisc_num = 0;
 
 	list_for_each_entry(qdisc_opt, &conf_adv_shaper_qdisc_list, entry) {
+		if (qdisc_opt->isdown != isdown) {
+			continue;
+		}
 		if (qdisc_num == 0) {
 			++qdisc_num;
 			continue;
@@ -312,11 +317,15 @@ static int install_adv_leaf_qdisc(struct rtnl_handle *rth, int ifindex, int rate
 	return 0;
 }
 
-static int install_adv_class(struct rtnl_handle *rth, int ifindex, int rate, int burst)
+static int install_adv_class(struct rtnl_handle *rth, int ifindex, int rate, int burst, __u8 isdown)
 {
 	struct adv_shaper_class *class_opt;
 
 	list_for_each_entry(class_opt, &conf_adv_shaper_class_list, entry) {
+		if (class_opt->isdown != isdown) {
+			continue;
+		}
+
 		struct qdisc_opt opt = {
 			.kind = "htb",
 			.handle  = class_opt->classid,
@@ -437,11 +446,14 @@ static int install_fw_filter(struct rtnl_handle *rth, int ifindex, struct adv_sh
 
 }
 
-static int install_adv_filter(struct rtnl_handle *rth, int ifindex)
+static int install_adv_filter(struct rtnl_handle *rth, int ifindex, __u8 isdown)
 {
 	struct adv_shaper_filter *filter_opt;
 
 	list_for_each_entry(filter_opt, &conf_adv_shaper_filter_list, entry) {
+		if (filter_opt->isdown != isdown) {
+			continue;
+		}
 		if (filter_opt->kind == ADV_SHAPER_FILTER_NET || filter_opt->kind == ADV_SHAPER_FILTER_NET6 || filter_opt->kind == ADV_SHAPER_FILTER_U32_RAW) {
 			if (install_u32_filter(rth, ifindex, filter_opt)) {
 				log_error("limiter: adv_shaper: filter: u32: error while installing filter (parent 0x%x, priority %u, classid 0x%x)!\n",
@@ -468,18 +480,18 @@ static int install_adv_filter(struct rtnl_handle *rth, int ifindex)
 }
 
 
-static int install_adv_shaper(struct rtnl_handle *rth, int ifindex, int rate, int burst)
+static int install_adv_shaper(struct rtnl_handle *rth, int ifindex, int rate, int burst, __u8 isdown)
 {
 	__u8 res = 0;
 	pthread_rwlock_rdlock(&adv_shaper_lock);
 
-	res = install_adv_root_qdisc(rth, ifindex, rate, burst);
+	res = install_adv_root_qdisc(rth, ifindex, rate, burst, isdown);
 	if(!res) 
-		res = install_adv_class(rth, ifindex, rate, burst);
+		res = install_adv_class(rth, ifindex, rate, burst, isdown);
 	if(!res) 
-		res = install_adv_leaf_qdisc(rth, ifindex, rate, burst);
+		res = install_adv_leaf_qdisc(rth, ifindex, rate, burst, isdown);
 	if(!res) 
-		res = install_adv_filter(rth, ifindex);
+		res = install_adv_filter(rth, ifindex, isdown);
 
 	pthread_rwlock_unlock(&adv_shaper_lock);
 
@@ -797,7 +809,7 @@ int install_limiter(struct ap_session *ses, int down_speed, int down_burst, int 
 		if (conf_down_limiter == LIM_TBF)
 			r = install_tbf(rth, ses->ifindex, down_speed, down_burst);
 		else if (conf_down_limiter == LIM_ADV_SHAPER) {
-			r = install_adv_shaper(rth, ses->ifindex, down_speed, down_burst);
+			r = install_adv_shaper(rth, ses->ifindex, down_speed, down_burst, ADV_SHAPER_DOWNLOAD);
 		} else {
 			r = install_htb(rth, ses->ifindex, down_speed, down_burst);
 			if (r == 0)
@@ -811,7 +823,9 @@ int install_limiter(struct ap_session *ses, int down_speed, int down_burst, int 
 
 		if (conf_up_limiter == LIM_POLICE)
 			r = install_police(rth, ses->ifindex, up_speed, up_burst);
-		else {
+		else if (conf_up_limiter == LIM_ADV_SHAPER) {
+			r = install_adv_shaper(rth, ses->ifindex, up_speed, up_burst, ADV_SHAPER_UPLOAD);
+		} else {
 			r = install_htb_ifb(rth, ses->ifindex, idx, up_speed, up_burst);
 			if (r == 0)
 				r = install_leaf_qdisc(rth, conf_ifb_ifindex, 0x00010000 + idx, idx << 16);
