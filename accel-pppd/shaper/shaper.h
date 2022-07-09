@@ -13,6 +13,7 @@
 #define ADV_SHAPER_QDISC_TBF 2
 #define ADV_SHAPER_QDISC_SFQ 3
 #define ADV_SHAPER_QDISC_FQ_CODEL 4
+#define ADV_SHAPER_QDISC_INGRESS 5
 
 #define ADV_SHAPER_FILTER_NET     1
 #define ADV_SHAPER_FILTER_NET6    2
@@ -87,6 +88,12 @@ struct qdisc_opt {
 //	target;
 //	interval;
 //	ecn;
+//---------------------
+//
+//-------INGRESS-------
+//	kind;
+//	handle;
+//	parent;
 //---------------------
 
 struct adv_shaper_qdisc {

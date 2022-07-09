@@ -252,6 +252,14 @@ static int prepare_qdisc_opt(struct adv_shaper_qdisc *qdisc_opt, struct qdisc_op
 		opt->ecn      = qdisc_opt->ecn;
 		opt->qdisc    = qdisc_fq_codel;
 
+	} else if (!strcmp(qdisc_opt->kind, "ingress")) {
+
+		opt->kind     = "ingress";
+		opt->handle   = qdisc_opt->handle;
+		opt->parent   = qdisc_opt->parent;
+
+		opt->qdisc    = NULL;
+
 	} else {
 		return -1;
 	}
@@ -486,11 +494,11 @@ static int install_adv_shaper(struct rtnl_handle *rth, int ifindex, int rate, in
 	pthread_rwlock_rdlock(&adv_shaper_lock);
 
 	res = install_adv_root_qdisc(rth, ifindex, rate, burst, isdown);
-	if(!res) 
+	if(!res)
 		res = install_adv_class(rth, ifindex, rate, burst, isdown);
-	if(!res) 
+	if(!res)
 		res = install_adv_leaf_qdisc(rth, ifindex, rate, burst, isdown);
-	if(!res) 
+	if(!res)
 		res = install_adv_filter(rth, ifindex, isdown);
 
 	pthread_rwlock_unlock(&adv_shaper_lock);

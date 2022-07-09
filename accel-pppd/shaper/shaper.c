@@ -1180,6 +1180,8 @@ static void load_config(void)
 			conf_up_limiter = LIM_POLICE;
 		else if (!strcmp(opt, "htb"))
 			conf_up_limiter = LIM_HTB;
+		else if (!strcmp(opt, "adv_shaper"))
+			conf_up_limiter = LIM_ADV_SHAPER;
 		else
 			log_error("shaper: unknown upstream limiter '%s'\n", opt);
 	}

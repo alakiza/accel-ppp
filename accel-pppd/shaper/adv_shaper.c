@@ -363,7 +363,7 @@ static int load_qdisc_fq_codel(struct adv_shaper_qdisc *qopt, char **params, siz
 #undef cannot_parse_log
 }
 
-static int load_qdisc_sfq(struct adv_shaper_qdisc *qopt, char **params, size_t param_count) 
+static int load_qdisc_sfq(struct adv_shaper_qdisc *qopt, char **params, size_t param_count)
 {
 #define cannot_parse_log(key, value)  \
 	log_error("adv_shaper: qdisc: sfq: Cannot parse %s! (%s)\n", key, value)
@@ -432,6 +432,54 @@ static int load_qdisc_sfq(struct adv_shaper_qdisc *qopt, char **params, size_t p
 #undef cannot_parse_log
 }
 
+static int load_qdisc_ingress(struct adv_shaper_qdisc *qopt, char **params, size_t param_count)
+{
+#define cannot_parse_log(key, value)  \
+	log_error("adv_shaper: qdisc: ingress: Cannot parse %s! (%s)\n", key, value)
+
+	__u32 handle   = 0;
+	__u32 parentid = 0;
+
+	char *key = NULL;
+	char *value = NULL;
+
+	for (size_t i = 0; i < param_count; ++i) {
+		key = params[i];
+		if (i+1 < param_count) {
+			value = params[i+1];
+			++i;
+		} else {
+			log_error("adv_shaper: qdisc: ingress: Not enough parameters for building key-value pair! key == (%s)\n", key);
+			return -1;
+		}
+		if (!strcmp(key, "handle")) {
+			if (parse_classid(&handle, value)) {
+				cannot_parse_log(key, value);
+				return -1;
+			}
+		} else if (!strcmp(key, "parent")) {
+			if (parse_classid(&parentid, value)) {
+				cannot_parse_log(key, value);
+				return -1;
+			}
+		} else {
+			log_error("adv_shaper: qdisc: ingress: Unknown key! key == (%s)\n", key);
+			return -1;
+		}
+	}
+
+	if (!handle || !parentid) {
+		log_error("adv_shaper: qdisc: ingress: Not enough columns! Format - qdisc = ingress handle HANDLE parent PARENTID\n");
+		return -1;
+	}
+
+	qopt->handle = handle;
+	qopt->parent = parentid;
+
+	return 0;
+#undef cannot_parse_log
+}
+
 static void free_advanced_shaper_qdisc() {
 	struct adv_shaper_qdisc* qdisc;
 	while (!list_empty(&conf_adv_shaper_qdisc_list)) {
@@ -459,8 +507,10 @@ static struct adv_shaper_qdisc* preload_advanced_shaper_qdisc(char* opt_str)
 			kind = ADV_SHAPER_QDISC_SFQ;
 		} else if (!strcmp(params[0], "fq_codel")) {
 			kind = ADV_SHAPER_QDISC_FQ_CODEL;
+		} else if (!strcmp(params[0], "ingress")) {
+			kind = ADV_SHAPER_QDISC_INGRESS;
 		} else {
-			log_error("adv_shaper: qdisc: Unknown qdisc (%s). Supported : htb,tbf,sfq,fq_codel  (%s)\n", params[0], opt_str);
+			log_error("adv_shaper: qdisc: Unknown qdisc (%s). Supported : htb,tbf,sfq,fq_codel,ingress  (%s)\n", params[0], opt_str);
 			goto parse_end;
 		}
 	} else {
@@ -524,7 +574,18 @@ static struct adv_shaper_qdisc* preload_advanced_shaper_qdisc(char* opt_str)
 			goto parse_end;
 		}
 
-	} else {
+	} else if (kind == ADV_SHAPER_QDISC_INGRESS) {
+
+		qdisc->kind = "ingress";
+		if (!load_qdisc_ingress(qdisc, params+1, sended_params)) {
+			log_info2("adv_shaper: qdisc: Loaded qdisc (%s) as (handle: 0x%x, parent: 0x%x)\n",
+					opt_str, qdisc->handle, qdisc->parent);
+		} else {
+			log_error("adv_shaper: qdisc: Error while reading ingress params (%s)\n", opt_str);
+			_free(qdisc);
+			qdisc = NULL;
+			goto parse_end;
+		}
 
 	}
 
@@ -545,9 +606,8 @@ parse_end:
 //Config pattern:
 //HTB:
 //qdisc = KIND,HANDLE,PARENT,r2q,DEF_CLASS
-static int load_advanced_shaper_qdisc(struct conf_sect_t *s, __u8 isdown) {
-	free_advanced_shaper_qdisc();
-
+static int load_advanced_shaper_qdisc(struct conf_sect_t *s, __u8 isdown) 
+{
 	struct conf_option_t *opt = NULL;
 
 	list_for_each_entry(opt, &s->items, entry) {
@@ -678,9 +738,8 @@ parse_end:
 
 //Config pattern:
 //class = CLASSID,PARENTID,RATE,BURST,CBURST
-static int load_advanced_shaper_class(struct conf_sect_t *s, __u8 isdown) {
-	free_advanced_shaper_class();
-
+static int load_advanced_shaper_class(struct conf_sect_t *s, __u8 isdown)
+{
 	struct conf_option_t *opt = NULL;
 
 	list_for_each_entry(opt, &s->items, entry) {
@@ -1168,8 +1227,6 @@ parse_end:
 //filter_net = PARENT,PRIO,IP4CIDR,(SRC/DST),FLOWID(aka CLASSID)
 static int load_advanced_shaper_filter(struct conf_sect_t *s, __u8 isdown)
 {
-	free_advanced_shaper_filter();
-
 	struct conf_option_t *opt;
 
 	list_for_each_entry(opt, &s->items, entry) {
@@ -1285,6 +1342,11 @@ void load_advanced_shaper()
 
 	log_debug("adv_shaper: load adv_shaper download sections BEGIN\n");
 	pthread_rwlock_wrlock(&adv_shaper_lock);
+
+	free_advanced_shaper_filter();
+	free_advanced_shaper_class();
+	free_advanced_shaper_qdisc();
+
 	if (sect_download) {
 		if (!check_advanced_shaper(sect_download)) {
 			load_advanced_shaper_qdisc(sect_download, ADV_SHAPER_DOWNLOAD);
