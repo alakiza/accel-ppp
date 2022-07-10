@@ -582,9 +582,6 @@ static int install_adv_filter(struct rtnl_handle *rth, int ifindex, int rate, in
 
 		list_for_each_entry(action_opt, &conf_adv_shaper_action_list, entry) {
 			if (action_opt->parentid == filter_opt->parentid && action_opt->priority == filter_opt->priority) {
-				log_debug("adv_shaper: install: action = (kind %s, parentid 0x%x, priority %u, action %u)\n",
-						action_opt->kind, action_opt->parentid, action_opt->priority, action_opt->action);
-
 				opt = _malloc(sizeof(*opt));
 				memset(opt, 0, sizeof(*opt));
 

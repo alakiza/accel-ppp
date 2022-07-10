@@ -1593,37 +1593,56 @@ static int check_advanced_shaper(struct conf_sect_t *s)
 void load_advanced_shaper()
 {
 	struct conf_sect_t *sect_download = conf_get_section("advanced_shaper");
+	struct conf_sect_t *sect_upload = conf_get_section("advanced_shaper_up");
+	int check_res = 0;
 
-	log_debug("adv_shaper: load adv_shaper download sections BEGIN\n");
+	log_debug("adv_shaper: load adv_shaper sections BEGIN\n");
 	pthread_rwlock_wrlock(&adv_shaper_lock);
 
-	free_advanced_shaper_action();
-	free_advanced_shaper_filter();
-	free_advanced_shaper_class();
-	free_advanced_shaper_qdisc();
-
-	if (sect_download) {
-		if (!check_advanced_shaper(sect_download)) {
-			load_advanced_shaper_qdisc(sect_download, ADV_SHAPER_DOWNLOAD);
-			load_advanced_shaper_class(sect_download, ADV_SHAPER_DOWNLOAD);
-			load_advanced_shaper_filter(sect_download, ADV_SHAPER_DOWNLOAD);
-			load_advanced_shaper_action(sect_download, ADV_SHAPER_DOWNLOAD);
+	if (conf_up_limiter == LIM_ADV_SHAPER) {
+		if (sect_upload) {
+			check_res |= check_advanced_shaper(sect_upload);
+		} else {
+			log_error("adv_shaper: section \"advanced_shaper_up\" not found!\n");
+			goto out_err;
 		}
 	}
-	log_debug("adv_shaper: load adv_shaper download section END\n");
 
-	struct conf_sect_t *sect_upload = conf_get_section("advanced_shaper_up");
-
-	log_debug("adv_shaper: load adv_shaper upload section BEGIN\n");
-	if (sect_upload) {
-		if (!check_advanced_shaper(sect_upload)) {
-			load_advanced_shaper_qdisc(sect_upload, ADV_SHAPER_UPLOAD);
-			load_advanced_shaper_class(sect_upload, ADV_SHAPER_UPLOAD);
-			load_advanced_shaper_filter(sect_upload, ADV_SHAPER_UPLOAD);
-			load_advanced_shaper_action(sect_upload, ADV_SHAPER_UPLOAD);
+	if (conf_down_limiter == LIM_ADV_SHAPER) {
+		if (sect_download) {
+			check_res |= check_advanced_shaper(sect_download);
+		} else {
+			log_error("adv_shaper: section \"advanced_shaper\" not found!\n");
+			goto out_err;
 		}
 	}
+
+	if (!check_res) {
+		free_advanced_shaper_action();
+		free_advanced_shaper_filter();
+		free_advanced_shaper_class();
+		free_advanced_shaper_qdisc();
+	} else {
+		log_error("adv_shaper: Error while configuration checkout!\n");
+		goto out_err;
+	}
+
+	if (conf_down_limiter == LIM_ADV_SHAPER && sect_download) {
+		load_advanced_shaper_qdisc(sect_download, ADV_SHAPER_DOWNLOAD);
+		load_advanced_shaper_class(sect_download, ADV_SHAPER_DOWNLOAD);
+		load_advanced_shaper_filter(sect_download, ADV_SHAPER_DOWNLOAD);
+		load_advanced_shaper_action(sect_download, ADV_SHAPER_DOWNLOAD);
+	}
+
+	if (conf_up_limiter == LIM_ADV_SHAPER && sect_upload) {
+		load_advanced_shaper_qdisc(sect_upload, ADV_SHAPER_UPLOAD);
+		load_advanced_shaper_class(sect_upload, ADV_SHAPER_UPLOAD);
+		load_advanced_shaper_filter(sect_upload, ADV_SHAPER_UPLOAD);
+		load_advanced_shaper_action(sect_upload, ADV_SHAPER_UPLOAD);
+	}
+
+out_err:
 	pthread_rwlock_unlock(&adv_shaper_lock);
-	log_debug("adv_shaper: load adv_shaper upload section END\n");
+	log_debug("adv_shaper: load adv_shaper sections END\n");
 }
 
