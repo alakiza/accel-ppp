@@ -64,7 +64,7 @@ struct action_opt {
 	__u32 mpu;
 
 	int action;
-	int (*action_prepare)(struct action_opt *opt, struct nlmsghdr *n);
+	int (*action_prepare)(struct action_opt *opt, struct nlmsghdr *n, int *prio);
 };
 
 //TC Action

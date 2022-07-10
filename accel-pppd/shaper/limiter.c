@@ -11,6 +11,7 @@
 #include <linux/if_ether.h>
 #include <linux/pkt_cls.h>
 #include <linux/pkt_sched.h>
+#include <linux/tc_act/tc_gact.h>
 #include <linux/tc_act/tc_mirred.h>
 #include <linux/tc_act/tc_skbedit.h>
 
@@ -407,12 +408,20 @@ static int install_u32_filter(struct rtnl_handle *rth, int ifindex, struct adv_s
 	struct rtattr *tail = NLMSG_TAIL(&req.n);
 	addattr_l(&req.n, MAX_MSG, TCA_OPTIONS, NULL, 0);
 
+	int action_prio = 0;
+
+	struct rtattr *tail_action = NLMSG_TAIL(&req.n);
+	addattr_l(&req.n, MAX_MSG, TCA_U32_ACT, NULL, 0);
+
 	struct action_opt *action_opt = NULL;
 	list_for_each_entry(action_opt, action_list, entry) {
 		if (action_opt->action_prepare) {
-			action_opt->action_prepare(action_opt, &req.n);
+			++action_prio;
+			action_opt->action_prepare(action_opt, &req.n, &action_prio);
 		}
 	}
+
+	tail_action->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)tail_action;
 
 	__u32 flowid = filter_opt->classid;
 	addattr_l(&req.n, MAX_MSG, TCA_U32_CLASSID, &(flowid), 4);
@@ -463,29 +472,34 @@ static int install_fw_filter(struct rtnl_handle *rth, int ifindex, struct adv_sh
 
 }
 
-static int action_pass(struct action_opt *aopt, struct nlmsghdr *n)
+static int action_pass(struct action_opt *aopt, struct nlmsghdr *n, int *prio)
 {
+	struct rtattr *tail, *tail1;
+
+	struct tc_gact p = {
+		.action = aopt->action,
+	};
+
+	tail = NLMSG_TAIL(n);
+	addattr_l(n, MAX_MSG, *prio, NULL, 0);
+	addattr_l(n, MAX_MSG, TCA_ACT_KIND, "gact", 5);
+
+	tail1 = NLMSG_TAIL(n);
+
+	addattr_l(n, MAX_MSG, TCA_ACT_OPTIONS | NLA_F_NESTED, NULL, 0);
+	addattr_l(n, MAX_MSG, TCA_GACT_PARMS, &p, sizeof(p));
+
+	tail1->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail1;
+
+	tail->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail;
+
 	return 0;
-//	struct tc_htb_glob opt;
-//	struct rtattr *tail;
-//
-//	memset(&opt,0,sizeof(opt));
-//
-//	opt.rate2quantum = qopt->quantum;
-//	opt.version = 3;
-//	opt.defcls = qopt->defcls;
-//
-//	tail = NLMSG_TAIL(n);
-//	addattr_l(n, TCA_BUF_MAX, TCA_OPTIONS, NULL, 0);
-//	addattr_l(n, TCA_BUF_MAX, TCA_HTB_INIT, &opt, NLMSG_ALIGN(sizeof(opt)));
-//	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
-//	return 0;
 }
 
-static int action_police(struct action_opt *aopt, struct nlmsghdr *n)
+static int action_police(struct action_opt *aopt, struct nlmsghdr *n, int *prio)
 {
 	__u32 rtab[256];
-	struct rtattr *tail, *tail1, *tail2;
+	struct rtattr *tail1, *tail2;
 	int Rcell_log = -1;
 	unsigned int linklayer  = LINKLAYER_ETHERNET; /* Assume ethernet */
 
@@ -503,11 +517,8 @@ static int action_police(struct action_opt *aopt, struct nlmsghdr *n)
 		return -1;
 	}
 
-	tail = NLMSG_TAIL(n);
-	addattr_l(n, MAX_MSG, TCA_U32_ACT, NULL, 0);
-
 	tail1 = NLMSG_TAIL(n);
-	addattr_l(n, MAX_MSG, 1, NULL, 0);
+	addattr_l(n, MAX_MSG, *prio, NULL, 0);
 	addattr_l(n, MAX_MSG, TCA_ACT_KIND, "police", 7);
 
 	tail2 = NLMSG_TAIL(n);
@@ -518,25 +529,7 @@ static int action_police(struct action_opt *aopt, struct nlmsghdr *n)
 
 	tail1->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail1;
 
-	tail->rta_len = (void *)NLMSG_TAIL(n) - (void *)tail;
-
 	return 0;
-
-
-//	struct tc_htb_glob opt;
-//	struct rtattr *tail;
-//
-//	memset(&opt,0,sizeof(opt));
-//
-//	opt.rate2quantum = qopt->quantum;
-//	opt.version = 3;
-//	opt.defcls = qopt->defcls;
-//
-//	tail = NLMSG_TAIL(n);
-//	addattr_l(n, TCA_BUF_MAX, TCA_OPTIONS, NULL, 0);
-//	addattr_l(n, TCA_BUF_MAX, TCA_HTB_INIT, &opt, NLMSG_ALIGN(sizeof(opt)));
-//	tail->rta_len = (void *) NLMSG_TAIL(n) - (void *) tail;
-//	return 0;
 }
 
 static int prepare_action_opt(struct adv_shaper_action *action_opt, struct action_opt *opt, int rate, int burst)

@@ -838,7 +838,11 @@ static int load_filter_net(struct adv_shaper_filter *fopt, char **params, size_t
 
 		} else if (!strcmp(key, "ip")) {
 			if (u_parse_ip4cidr(value, &prefix, &prefix_len)) {
-				ip_mask = htonl(0xffffffff << (32 - prefix_len));
+				if (prefix_len) {
+					ip_mask = htonl(0xffffffff << (32 - prefix_len));
+				} else {
+					ip_mask = 0;
+				}
 			} else {
 				cannot_parse_log(key, value);
 				return -1;
