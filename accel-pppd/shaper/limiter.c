@@ -408,20 +408,22 @@ static int install_u32_filter(struct rtnl_handle *rth, int ifindex, struct adv_s
 	struct rtattr *tail = NLMSG_TAIL(&req.n);
 	addattr_l(&req.n, MAX_MSG, TCA_OPTIONS, NULL, 0);
 
-	int action_prio = 0;
+	if (!list_empty(action_list)) {
+		int action_prio = 0;
 
-	struct rtattr *tail_action = NLMSG_TAIL(&req.n);
-	addattr_l(&req.n, MAX_MSG, TCA_U32_ACT, NULL, 0);
+		struct rtattr *tail_action = NLMSG_TAIL(&req.n);
+		addattr_l(&req.n, MAX_MSG, TCA_U32_ACT, NULL, 0);
 
-	struct action_opt *action_opt = NULL;
-	list_for_each_entry(action_opt, action_list, entry) {
-		if (action_opt->action_prepare) {
-			++action_prio;
-			action_opt->action_prepare(action_opt, &req.n, &action_prio);
+		struct action_opt *action_opt = NULL;
+		list_for_each_entry(action_opt, action_list, entry) {
+			if (action_opt->action_prepare) {
+				++action_prio;
+				action_opt->action_prepare(action_opt, &req.n, &action_prio);
+			}
 		}
-	}
 
-	tail_action->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)tail_action;
+		tail_action->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)tail_action;
+	}
 
 	__u32 flowid = filter_opt->classid;
 	addattr_l(&req.n, MAX_MSG, TCA_U32_CLASSID, &(flowid), 4);
@@ -435,7 +437,7 @@ static int install_u32_filter(struct rtnl_handle *rth, int ifindex, struct adv_s
 	return 0;
 }
 
-static int install_fw_filter(struct rtnl_handle *rth, int ifindex, struct adv_shaper_filter *filter_opt)
+static int install_fw_filter(struct rtnl_handle *rth, int ifindex, struct adv_shaper_filter *filter_opt, struct list_head *action_list)
 {
 	struct {
 		struct nlmsghdr 	n;
@@ -459,6 +461,24 @@ static int install_fw_filter(struct rtnl_handle *rth, int ifindex, struct adv_sh
 
 	struct rtattr *tail = NLMSG_TAIL(&req.n);
 	addattr_l(&req.n, TCA_BUF_MAX, TCA_OPTIONS, NULL, 0);
+
+	if (!list_empty(action_list)) {
+		int action_prio = 0;
+
+		struct rtattr *tail_action = NLMSG_TAIL(&req.n);
+		addattr_l(&req.n, MAX_MSG, TCA_FW_ACT, NULL, 0);
+
+		struct action_opt *action_opt = NULL;
+		list_for_each_entry(action_opt, action_list, entry) {
+			if (action_opt->action_prepare) {
+				++action_prio;
+				action_opt->action_prepare(action_opt, &req.n, &action_prio);
+			}
+		}
+
+		tail_action->rta_len = (void *)NLMSG_TAIL(&req.n) - (void *)tail_action;
+	}
+
 
 	__u32 flowid = filter_opt->classid;
 	addattr32(&req.n, TCA_BUF_MAX, TCA_FW_CLASSID, flowid);
@@ -608,7 +628,7 @@ static int install_adv_filter(struct rtnl_handle *rth, int ifindex, int rate, in
 				goto out_error;
 			}
 		} else if (filter_opt->kind == ADV_SHAPER_FILTER_FW) {
-			if (install_fw_filter(rth, ifindex, filter_opt)) {
+			if (install_fw_filter(rth, ifindex, filter_opt, &adv_shaper_action_for_filter_list)) {
 				log_error("limiter: adv_shaper: filter: fw: error while installing filter (0x%x, %u, %u, 0x%x)!\n",
 						filter_opt->parentid, filter_opt->priority, filter_opt->fwmark, filter_opt->classid);
 				goto out_error;

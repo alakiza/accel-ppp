@@ -1339,8 +1339,8 @@ static int load_action_police(struct adv_shaper_action *aopt, char **params, siz
 
 	aopt->mtu    = mtu;
 	aopt->mpu    = mpu;
-	aopt->rate   = rate;
-	aopt->burst  = burst;
+	aopt->rate   = rate  * 1000 / 8;
+	aopt->burst  = burst * 1000 / 8;
 	aopt->action = act;
 
 	return 0;
